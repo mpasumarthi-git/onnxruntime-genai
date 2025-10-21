@@ -4,7 +4,6 @@
 #include <algorithm>
 #include <array>
 #include <cstring>  // for memcmp
-#include <filesystem>
 #include <map>
 #include <numeric>
 #include <random>
@@ -546,58 +545,30 @@ TEST(SamplingTests, RandomizedSamplingSelectTopCuda_BatchSize1_LargeVocabSize) {
 }
 #endif
 
-// Helper function for common NvTensorRT test setup
-struct NvTensorRtRtxTestSetup {
-  std::unique_ptr<OgaModel> model;
-  std::unique_ptr<OgaGeneratorParams> params;
-  bool is_available;
-
-  static NvTensorRtRtxTestSetup Create(int vocab_size, int batch_size, int max_length = 10) {
-    NvTensorRtRtxTestSetup setup;
-
-    // Check if model is available
-    if (!std::filesystem::exists(MODEL_PATH "hf-internal-testing/phi3-fp16-nvtrt")) {
-      setup.is_available = false;
-      return setup;
-    }
-
-    setup.is_available = true;
-
-    // Create config with vocab_size overlay
-    auto config = OgaConfig::Create(MODEL_PATH "hf-internal-testing/phi3-fp16-nvtrt");
-    std::string overlay = R"({ "model": { "vocab_size" : )" + std::to_string(vocab_size) + R"( } })";
-    config->Overlay(overlay.c_str());
-    config->ClearProviders();
-    config->AppendProvider("NvTensorRtRtx");
-
-    // Create model and params with common settings
-    setup.model = OgaModel::Create(*config);
-    setup.params = OgaGeneratorParams::Create(*setup.model);
-    setup.params->SetSearchOption("max_length", max_length);
-    setup.params->SetSearchOptionBool("do_sample", true);
-    setup.params->SetSearchOption("batch_size", batch_size);
-
-    return setup;
-  }
-};
-
+#if USE_TRT_RTX
 TEST(SamplingTests, BatchedSamplingTopPNvTensorRtRtx) {
-  int batch_size = 4;
-  int vocab_size = 5;
-  auto setup = NvTensorRtRtxTestSetup::Create(vocab_size, batch_size);
-  if (!setup.is_available) {
-    GTEST_SKIP() << "NvTensorRT model not available";
-  }
-
+  std::vector<int32_t> input_ids{0, 1, 2, 3};
   std::vector<int32_t> expected_output{1, 2, 3, 4};
   std::vector<float> logits_cpu = {0.1f, 0.6f, 0.1f, 0.1f, 0.1f,
                                    0.1f, 0.1f, 0.6f, 0.1f, 0.1f,
                                    0.1f, 0.1f, 0.1f, 0.6f, 0.1f,
                                    0.1f, 0.1f, 0.1f, 0.1f, 0.6f};
+  int batch_size = 4;
+  int vocab_size = 5;
 
-  setup.params->SetSearchOption("top_p", 0.25f);
+  auto config = OgaConfig::Create(MODEL_PATH "hf-internal-testing/phi3-fp16-nvtrt");
+  config->Overlay(R"({ "model": { "vocab_size" : 5 } })");
+  config->ClearProviders();
+  config->AppendProvider("NvTensorRtRtx");
 
-  auto generator = OgaGenerator::Create(*setup.model, *setup.params);
+  auto model = OgaModel::Create(*config);
+  auto params = OgaGeneratorParams::Create(*model);
+  params->SetSearchOption("max_length", 10);
+  params->SetSearchOptionBool("do_sample", true);
+  params->SetSearchOption("top_p", 0.25f);
+  params->SetSearchOption("batch_size", batch_size);
+
+  auto generator = OgaGenerator::Create(*model, *params);
   generator->SetLogits(*OgaTensor::Create(logits_cpu.data(), std::array<int64_t, 2>{batch_size, vocab_size}));
 
   // Verify outputs match expected outputs
@@ -607,21 +578,27 @@ TEST(SamplingTests, BatchedSamplingTopPNvTensorRtRtx) {
 }
 
 TEST(SamplingTests, BatchedSamplingTopKNvTensorRtRtx) {
-  int batch_size = 4;
-  int vocab_size = 5;
-  auto setup = NvTensorRtRtxTestSetup::Create(vocab_size, batch_size);
-  if (!setup.is_available) {
-    GTEST_SKIP() << "NvTensorRT model not available";
-  }
-
+  std::vector<int32_t> input_ids{0, 1, 2, 3};
   std::vector<float> logits_cpu{2.0f, 1.5f, 1.25f, 0.25f, 0.25f,
                                 0.25f, 2.0f, 1.25f, 1.5f, 0.25f,
                                 0.25f, 2.0f, 0.25f, 1.5f, 1.25f,
                                 1.25f, 0.25f, 1.5f, 0.25f, 2.0f};
+  int batch_size = 4;
+  int vocab_size = 5;
 
-  setup.params->SetSearchOption("top_k", 2);
+  auto config = OgaConfig::Create(MODEL_PATH "hf-internal-testing/phi3-fp16-nvtrt");
+  config->Overlay(R"({ "model": { "vocab_size" : 5 } })");
+  config->ClearProviders();
+  config->AppendProvider("NvTensorRtRtx");
 
-  auto generator = OgaGenerator::Create(*setup.model, *setup.params);
+  auto model = OgaModel::Create(*config);
+  auto params = OgaGeneratorParams::Create(*model);
+  params->SetSearchOption("max_length", 10);
+  params->SetSearchOptionBool("do_sample", true);
+  params->SetSearchOption("top_k", 2);
+  params->SetSearchOption("batch_size", batch_size);
+
+  auto generator = OgaGenerator::Create(*model, *params);
   generator->SetLogits(*OgaTensor::Create(logits_cpu.data(), std::array<int64_t, 2>{batch_size, vocab_size}));
 
   // Verify outputs match expected outputs
@@ -635,22 +612,28 @@ TEST(SamplingTests, BatchedSamplingTopKNvTensorRtRtx) {
 }
 
 TEST(SamplingTests, BatchedSamplingTopPAndKNvTensorRtRtx) {
-  int batch_size = 4;
-  int vocab_size = 5;
-  auto setup = NvTensorRtRtxTestSetup::Create(vocab_size, batch_size);
-  if (!setup.is_available) {
-    GTEST_SKIP() << "NvTensorRT model not available";
-  }
-
+  std::vector<int32_t> input_ids{0, 1, 2, 3};
   std::vector<float> logits_cpu{2.0f, 1.5f, 1.25f, 0.25f, 0.25f,
                                 0.25f, 2.0f, 1.25f, 1.5f, 0.25f,
                                 0.25f, 2.0f, 0.25f, 1.5f, 1.25f,
                                 1.25f, 0.25f, 1.5f, 0.25f, 2.0f};
+  int batch_size = 4;
+  int vocab_size = 5;
 
-  setup.params->SetSearchOption("top_k", 2);
-  setup.params->SetSearchOption("top_p", 0.25f);
+  auto config = OgaConfig::Create(MODEL_PATH "hf-internal-testing/phi3-fp16-nvtrt");
+  config->Overlay(R"({ "model": { "vocab_size" : 5 } })");
+  config->ClearProviders();
+  config->AppendProvider("NvTensorRtRtx");
 
-  auto generator = OgaGenerator::Create(*setup.model, *setup.params);
+  auto model = OgaModel::Create(*config);
+  auto params = OgaGeneratorParams::Create(*model);
+  params->SetSearchOption("max_length", 10);
+  params->SetSearchOptionBool("do_sample", true);
+  params->SetSearchOption("top_k", 2);
+  params->SetSearchOption("top_p", 0.25f);
+  params->SetSearchOption("batch_size", batch_size);
+
+  auto generator = OgaGenerator::Create(*model, *params);
   generator->SetLogits(*OgaTensor::Create(logits_cpu.data(), std::array<int64_t, 2>{batch_size, vocab_size}));
 
   // Verify outputs match expected outputs
@@ -665,15 +648,20 @@ TEST(SamplingTests, BatchedSamplingTopPAndKNvTensorRtRtx) {
 
 TEST(SamplingTests, RandomizedSamplingTopPNvTensorRtRtx) {
   const int batch_size = 5;
-  const int vocab_size = 21;
   const float p = 0.95f;
+  const int vocab_size = 21;  // Keep same as CUDA for consistency
 
-  auto setup = NvTensorRtRtxTestSetup::Create(vocab_size, batch_size);
-  if (!setup.is_available) {
-    GTEST_SKIP() << "NvTensorRT model not available";
-  }
+  auto config = OgaConfig::Create(MODEL_PATH "hf-internal-testing/phi3-fp16-nvtrt");
+  config->Overlay(R"({ "model": { "vocab_size" : 21 } })");
+  config->ClearProviders();
+  config->AppendProvider("NvTensorRtRtx");
 
-  setup.params->SetSearchOption("top_p", p);
+  auto model = OgaModel::Create(*config);
+  auto params = OgaGeneratorParams::Create(*model);
+  params->SetSearchOption("max_length", 10);
+  params->SetSearchOptionBool("do_sample", true);
+  params->SetSearchOption("top_p", p);
+  params->SetSearchOption("batch_size", batch_size);
 
   std::random_device rd;
   std::mt19937 engine(rd());
@@ -693,7 +681,7 @@ TEST(SamplingTests, RandomizedSamplingTopPNvTensorRtRtx) {
         logits_cpu[indices[j] + vocab_size * b] = float(n - j);
     }
 
-    auto generator = OgaGenerator::Create(*setup.model, *setup.params);
+    auto generator = OgaGenerator::Create(*model, *params);
     generator->SetLogits(*OgaTensor::Create(logits_cpu.data(), std::array<int64_t, 2>{batch_size, vocab_size}));
     generator->GenerateNextToken();
     auto next_tokens = generator->GetNextTokens();
@@ -744,15 +732,20 @@ TEST(SamplingTests, RandomizedSamplingTopPNvTensorRtRtx) {
 
 TEST(SamplingTests, RandomizedSamplingTopKNvTensorRtRtx) {
   const int batch_size = 5;
-  const int vocab_size = 17;
   const int k = 5;
+  const int vocab_size = 17;
 
-  auto setup = NvTensorRtRtxTestSetup::Create(vocab_size, batch_size);
-  if (!setup.is_available) {
-    GTEST_SKIP() << "NvTensorRT model not available";
-  }
+  auto config = OgaConfig::Create(MODEL_PATH "hf-internal-testing/phi3-fp16-nvtrt");
+  config->Overlay(R"({ "model": { "vocab_size" : 17 } })");
+  config->ClearProviders();
+  config->AppendProvider("NvTensorRtRtx");
 
-  setup.params->SetSearchOption("top_k", k);
+  auto model = OgaModel::Create(*config);
+  auto params = OgaGeneratorParams::Create(*model);
+  params->SetSearchOption("max_length", 10);
+  params->SetSearchOptionBool("do_sample", true);
+  params->SetSearchOption("top_k", k);
+  params->SetSearchOption("batch_size", batch_size);
 
   std::random_device rd;
   std::mt19937 engine(rd());
@@ -771,7 +764,7 @@ TEST(SamplingTests, RandomizedSamplingTopKNvTensorRtRtx) {
         logits_cpu[indices[j] + vocab_size * b] = float(k - j);
     }
 
-    auto generator = OgaGenerator::Create(*setup.model, *setup.params);
+    auto generator = OgaGenerator::Create(*model, *params);
     generator->SetLogits(*OgaTensor::Create(logits_cpu.data(), std::array<int64_t, 2>{batch_size, vocab_size}));
     generator->GenerateNextToken();
     auto next_tokens = generator->GetNextTokens();
@@ -799,17 +792,22 @@ TEST(SamplingTests, RandomizedSamplingTopKNvTensorRtRtx) {
 
 TEST(SamplingTests, RandomizedSamplingTopPAndKNvTensorRtRtx) {
   const int batch_size = 5;
-  const int vocab_size = 21;
   const int k = 7;
   const float p = 0.75f;
+  const int vocab_size = 21;
 
-  auto setup = NvTensorRtRtxTestSetup::Create(vocab_size, batch_size);
-  if (!setup.is_available) {
-    GTEST_SKIP() << "NvTensorRT model not available";
-  }
+  auto config = OgaConfig::Create(MODEL_PATH "hf-internal-testing/phi3-fp16-nvtrt");
+  config->Overlay(R"({ "model": { "vocab_size" : 21 } })");
+  config->ClearProviders();
+  config->AppendProvider("NvTensorRtRtx");
 
-  setup.params->SetSearchOption("top_k", k);
-  setup.params->SetSearchOption("top_p", p);
+  auto model = OgaModel::Create(*config);
+  auto params = OgaGeneratorParams::Create(*model);
+  params->SetSearchOption("max_length", 10);
+  params->SetSearchOptionBool("do_sample", true);
+  params->SetSearchOption("top_k", k);
+  params->SetSearchOption("top_p", p);
+  params->SetSearchOption("batch_size", batch_size);
 
   std::random_device rd;
   std::mt19937 engine(rd());
@@ -828,7 +826,7 @@ TEST(SamplingTests, RandomizedSamplingTopPAndKNvTensorRtRtx) {
         logits_cpu[indices[j] + vocab_size * b] = float(k - j);
     }
 
-    auto generator = OgaGenerator::Create(*setup.model, *setup.params);
+    auto generator = OgaGenerator::Create(*model, *params);
     generator->SetLogits(*OgaTensor::Create(logits_cpu.data(), std::array<int64_t, 2>{batch_size, vocab_size}));
     generator->GenerateNextToken();
     auto next_tokens = generator->GetNextTokens();
@@ -874,13 +872,18 @@ TEST(SamplingTests, RandomizedSamplingTopPAndKNvTensorRtRtx) {
 TEST(SamplingTests, RandomizedSamplingSelectTopNvTensorRtRtx) {
   int batch_size = 5;
   int vocab_size = 32000;
+  std::vector<int32_t> input_ids{0, 1, 2, 3, 4};
 
-  auto setup = NvTensorRtRtxTestSetup::Create(vocab_size, batch_size);
-  if (!setup.is_available) {
-    GTEST_SKIP() << "NvTensorRT model not available";
-  }
+  auto config = OgaConfig::Create(MODEL_PATH "hf-internal-testing/phi3-fp16-nvtrt");
+  config->Overlay(R"({ "model": { "vocab_size" : 32000 } })");
+  config->ClearProviders();
+  config->AppendProvider("NvTensorRtRtx");
 
-  setup.params->SetSearchOptionBool("do_sample", false);
+  auto model = OgaModel::Create(*config);
+  auto params = OgaGeneratorParams::Create(*model);
+  params->SetSearchOption("max_length", 10);
+  params->SetSearchOptionBool("do_sample", false);
+  params->SetSearchOption("batch_size", batch_size);
 
   std::vector<float> logits_cpu(vocab_size * batch_size);
   std::vector<int> indices(vocab_size * batch_size);
@@ -892,7 +895,7 @@ TEST(SamplingTests, RandomizedSamplingSelectTopNvTensorRtRtx) {
     int num_large = dist(engine);
     CreateRandomLogits(logits_cpu.data(), num_large, vocab_size, batch_size, engine);
 
-    auto generator = OgaGenerator::Create(*setup.model, *setup.params);
+    auto generator = OgaGenerator::Create(*model, *params);
     generator->SetLogits(*OgaTensor::Create(logits_cpu.data(), std::array<int64_t, 2>{batch_size, vocab_size}));
     generator->GenerateNextToken();
     auto next_tokens = generator->GetNextTokens();
@@ -906,3 +909,4 @@ TEST(SamplingTests, RandomizedSamplingSelectTopNvTensorRtRtx) {
     }
   }
 }
+#endif
